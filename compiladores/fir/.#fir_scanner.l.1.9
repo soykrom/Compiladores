@@ -1,0 +1,106 @@
+%option c++ prefix="fir_scanner_" outfile="fir_scanner.cpp"
+%option stack noyywrap yylineno 8bit debug
+%{ 
+// make relevant includes before including the parser's tab file
+#include <string>
+#include <sstream>
+#include <cdk/ast/sequence_node.h>
+#include <cdk/ast/expression_node.h>
+#include <cdk/ast/lvalue_node.h>
+#include "fir_parser.tab.h"
+
+
+// output stream for building string literals
+static std::ostringstream strlit;
+
+// don't change this
+#define yyerror LexerError
+%}
+
+
+%x X_COMMENT X_COMMENT_STR
+%x X_STRING X_TIL
+%x X_OCTAL
+%%
+
+
+">="                   return tGE; 
+"<="                   return tLE; 
+"=="                   return tEQ; 
+"!="                   return tNE; 
+
+"~"                    return tLOGNOT;
+"&&"                   return tLOGAND;
+"||"                   return tLOGOR;
+
+"while"                return tWHILE;
+"finally"			   return tFINALLY;
+"do"				   return tDO;
+"if"                   return tIF; 
+"else"                 return tELSE; 
+"write"                return tWRITE;
+"writeln"			   return tWRITELN;
+"leave"				   return tLEAVE;
+"restart"			   return tRESTART;
+"return" 			   return tRETURN;
+"@"               	   return tAT;
+">>"				   return tSHIFT;
+"sizeof"			   return tSIZEOF;
+"null"				   return tNULLPTR;
+"->"				   return tRTVALUE;
+"*"					   return tPUBLIC;
+"?"					   return tEXTERNAL;
+"int"                  return tTYPE_INT;
+"string"               return tTYPE_STRING;
+"float"                return tTYPE_FLOAT;
+"void"                 return tTYPE_VOID;
+
+                /* Comments */
+
+"!!".*$                /* toda a linha e ignorada */
+
+"(*"                   yy_push_state(X_COMMENT);
+<X_COMMENT>"*)"        yy_pop_state();
+<X_COMMENT>.|"\n"      ;  /* ignore everything inside the comment */
+
+<X_COMMENT_STR>"*)"\'      yy_pop_state();
+<X_COMMENT_STR>"*)"        yy_pop_state(); yy_pop_state(); return tSTRING;
+<X_COMMENT_STR>.|"\n"      ;  /* ignore everything inside the comment */
+
+[A-Za-z][A-Za-z0-9_]*     yylval.s = new std::string(yytext); return tIDENTIFIER;
+
+"0"                       yy_push_state(X_OCTAL);
+<X_OCTAL>[0-7]+           { yylval.i = strtoul(yytext, NULL, 8); if(errno == ERANGE) yyerror("Overflow in base 8 number"); yy_pop_state(); return tINTEGER; }
+<X_OCTAL>.|\n             std::cerr << "WARNING: line " << lineno() << ": bad octal data!" << std::endl; exit(1);
+
+"\'"                      yy_push_state(X_STRING); yylval.s = new std::string("");
+<X_STRING>~               yy_push_state(X_TIL);
+<X_STRING>\'"(*"          yy_push_state(X_COMMENT_STR);  
+<X_STRING>\'[ \t\n]*\'    ;
+<X_STRING>\'              yy_pop_state(); return tSTRING;
+<X_STRING>\\\'            *yylval.s += yytext + 1;
+<X_STRING>.               *yylval.s += yytext;
+<X_STRING>\n              yyerror("newline in string");
+
+
+
+<X_TIL>n                  strlit << '\n'; yy_pop_state();
+<X_TIL>r                  strlit << '\r'; yy_pop_state();
+<X_TIL>t                  strlit << '\t'; yy_pop_state();
+<X_TIL>~                  strlit << '~'; yy_pop_state();
+<X_TIL>\'                 strlit << '\''; yy_pop_state();
+<X_TIL>[[:xdigit:]]{1,2}  { yylval.i = strtoul(yytext, NULL, 16); yy_pop_state(); return tINTEGER;}
+<X_TIL>.                  strlit << *yytext; yy_pop_state();
+
+([1-9][0-9]*)|[0]         { yylval.i = strtol(yytext, nullptr, 10); if(errno == ERANGE) yyerror("Overflow in base 10 number"); return tINTEGER; }
+
+
+(([1-9][0-9]+)|[0]\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)? { yylval.d = strtod(yytext, NULL); if(errno == ERANGE) yyerror("Overflow in base 10 number"); return tFLOAT; }
+
+[-()<>=+*/%;{}.]       return *yytext;
+
+[ \t\n]+               ; /* ignore whitespace */
+
+.                      yyerror("Unknown character");
+
+%%
